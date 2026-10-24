@@ -76,7 +76,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install
-      # 恢复官方原版 Tauri Action 调用（不加多余参数）
+
+        
+            # 官方原版 Tauri Action 调用（不改动任何编译参数）
       - name: Build the app (Windows)
         uses: tauri-apps/tauri-action@v0
         env:
@@ -98,21 +100,36 @@ jobs:
           releaseDraft: false
           prerelease: false
 
-      # 1. 整理产物到 dist 目录，将 3 个文件平铺在同一级
+      # 仅遍历 dtv.exe 并在日志打印路径，已知位置的两个安装包直接复制
       - name: Prepare distribution files
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item src-tauri/target/**/release/dtv.exe dist/
-          Copy-Item src-tauri/target/**/bundle/nsis/*.exe dist/
-          Copy-Item src-tauri/target/**/bundle/msi/*.msi dist/
-      # 2. 将免安装的 dtv.exe 追加上传到 Releases 页面，直接提供单文件直链下载（原名、不打包）
+
+          # 仅递归遍历 target 查找 release 阶段生成的 dtv.exe，并在日志中明确显示其路径
+          $exeFile = Get-ChildItem -Path "src-tauri/target" -Recurse -Filter "dtv.exe" | Where-Object { $_.FullName -notmatch "build" -and $_.FullName -notmatch "incremental" } | Select-Object -First 1
+          if ($exeFile) {
+            Write-Host "=========================================="
+            Write-Host "Found dtv.exe at path: $($exeFile.FullName)"
+            Write-Host "=========================================="
+            Copy-Item $exeFile.FullName -Destination dist/ -Force
+          } else {
+            Write-Error "dtv.exe not found under src-tauri/target!"
+            exit 1
+          }
+
+          # 从已知确定位置直接复制已生成的 NSIS 和 MSI 安装包
+          Copy-Item src-tauri/target/release/bundle/nsis/*.exe dist/ -Force
+          Copy-Item src-tauri/target/release/bundle/msi/*.msi dist/ -Force
+
+      # 将免安装的 dtv.exe 追加上传到 GitHub Release（单文件原名直链发布）
       - name: Upload standalone dtv.exe to Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ github.event.inputs.version || github.ref_name }} dist/dtv.exe --clobber
-      # 3. 将 3 个平铺好的原名文件上传为 Artifact（平铺无子目录）
+
+      # 将 3 个平铺好的原名文件上传为 Artifact
       - name: Upload Windows Installers
         uses: actions/upload-artifact@v4
         with:
