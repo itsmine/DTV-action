@@ -76,8 +76,7 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install
-
-      # 官方 Tauri Action 编译与 Release
+      # 恢复官方原版 Tauri Action 调用（不加多余参数）
       - name: Build the app (Windows)
         uses: tauri-apps/tauri-action@v0
         env:
@@ -88,7 +87,6 @@ jobs:
         with:
           tagName: ${{ github.event.inputs.version || github.ref_name }}
           releaseName: 'DTV ${{ github.event.inputs.version || github.ref_name }}'
-          args: --ignore-version-mismatches
           releaseBody: |
             ## 🎉 DTV Release ${{ github.event.inputs.version || github.ref_name }}
             
@@ -100,7 +98,7 @@ jobs:
           releaseDraft: false
           prerelease: false
 
-      # 上传编译好的安装包（EXE 与 MSI）至 GitHub Actions Artifacts
+      # 产物上传步骤：构建完成后将 .exe 和 .msi 上传至 Actions 详情页
       - name: Upload Windows Installers
         uses: actions/upload-artifact@v4
         with:
