@@ -2,18 +2,23 @@ name: Build (Windows)
 
 permissions:
   contents: write
+  packages: write
   actions: read
 
 on:
-  workflow_dispatch: # 支持在 GitHub Actions 页面一键手动触发
-    inputs:
-      version:
-        description: '发布版本号 (如 3.0.3)'
-        required: false
-        default: '3.0.3'
   push:
+    branches:
+      - main       # 允许直接 push 到 main 触发构建，产生运行记录（避免显示“没有 runs”）
     tags:
       - 'v*.*.*'
+      - '*.*'
+      - '*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., v1.0.0 or 1.0)'
+        required: false
+        default: 'manual'
 
 jobs:
   build-windows:
@@ -22,10 +27,33 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install protobuf
+      # 官方原版环境依赖
+      - name: Install protobuf (Windows)
         run: |
           choco install protoc
           echo "C:\ProgramData\chocolatey\lib\protoc\tools" >> $env:GITHUB_PATH
+
+      - name: Install OpenSSL build prerequisites (Windows)
+        run: |
+          choco install strawberryperl nasm -y
+          echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
+          echo "C:\Strawberry\perl\bin" >> $env:GITHUB_PATH
+
+      - name: Set rusty_v8 archive (Windows)
+        run: |
+          echo "RUSTY_V8_ARCHIVE=https://github.com/denoland/rusty_v8/releases/download/v0.93.1/rusty_v8_release_x86_64-pc-windows-msvc.lib.gz" >> $env:GITHUB_ENV
+
+      - name: Patch tauri config for Windows build
+        shell: powershell
+        run: |
+          $path = "src-tauri/tauri.conf.json"
+          $json = Get-Content -Path $path -Raw -Encoding utf8 | ConvertFrom-Json
+          if ($null -ne $json.app -and $null -ne $json.app.windows -and $json.app.windows.Count -gt 0) {
+            $win0 = $json.app.windows[0]
+            $win0 | Add-Member -NotePropertyName decorations -NotePropertyValue $false -Force
+          }
+          $raw = $json | ConvertTo-Json -Depth 100
+          [System.IO.File]::WriteAllText($path, $raw, [System.Text.UTF8Encoding]::new($false))
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -38,22 +66,41 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
 
-      - name: Install Rust Nightly
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
 
       - name: Install frontend dependencies
         run: pnpm install
 
+      # 官方 Tauri Action 编译与 Release
       - name: Build the app (Windows)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          RUSTY_V8_MIRROR: https://github.com/denoland/rusty_v8/releases/download
         with:
-          tagName: v${{ github.event.inputs.version || '3.0.3' }}
-          releaseName: 'DTV ${{ github.event.inputs.version || '3.0.3' }}'
-          args: --ignore-version-mismatches # 忽略插件小版本轻微漂移
+          tagName: ${{ github.event.inputs.version || github.ref_name }}
+          releaseName: 'DTV ${{ github.event.inputs.version || github.ref_name }}'
+          args: --ignore-version-mismatches
+          releaseBody: |
+            ## 🎉 DTV Release ${{ github.event.inputs.version || github.ref_name }}
+            
+            ### 📦 安装包下载
+            - **Windows**: DTV_${{ github.event.inputs.version || github.ref_name }}_x64-setup.exe
+            
+            ### 🔧 安装说明
+            - **Windows**: 下载 .exe 文件，右键以管理员身份运行
+          releaseDraft: false
+          prerelease: false
 
-      
+      # 上传编译好的安装包（EXE 与 MSI）至 GitHub Actions Artifacts
       - name: Upload Windows Installers
         uses: actions/upload-artifact@v4
         with:
