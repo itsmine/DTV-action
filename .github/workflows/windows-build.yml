@@ -98,12 +98,24 @@ jobs:
           releaseDraft: false
           prerelease: false
 
-      # 产物上传步骤：构建完成后将 .exe 和 .msi 上传至 Actions 详情页
+      # 1. 整理产物到 dist 目录，将 3 个文件平铺在同一级
+      - name: Prepare distribution files
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item src-tauri/target/**/release/dtv.exe dist/
+          Copy-Item src-tauri/target/**/bundle/nsis/*.exe dist/
+          Copy-Item src-tauri/target/**/bundle/msi/*.msi dist/
+      # 2. 将免安装的 dtv.exe 追加上传到 Releases 页面，直接提供单文件直链下载（原名、不打包）
+      - name: Upload standalone dtv.exe to Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.event.inputs.version || github.ref_name }} dist/dtv.exe --clobber
+      # 3. 将 3 个平铺好的原名文件上传为 Artifact（平铺无子目录）
       - name: Upload Windows Installers
         uses: actions/upload-artifact@v4
         with:
           name: DTV-Windows-Installers
-          path: |
-            src-tauri/target/release/*.exe
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/msi/*.msi
+          path: dist/*
+          if-no-files-found: error
